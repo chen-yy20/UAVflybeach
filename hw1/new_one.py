@@ -7,9 +7,11 @@ from geometry_msgs.msg import Twist, Pose
 from sensor_msgs.msg import Image
 from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge, CvBridgeError
+from math import pi
 
 class NavigateDemo:
     def __init__(self, robot_name):
+        # sigint_handler 干扰信号
         signal.signal(signal.SIGINT, self.sigint_handler)
         self.robot_name = robot_name
         self.cmd_twist = Twist()
@@ -18,14 +20,16 @@ class NavigateDemo:
         self.cmd_pub = rospy.Publisher(self.robot_name+'/cmd_vel', Twist, queue_size=1)
         # 订阅话题
         self.odom_sub = rospy.Subscriber(self.robot_name+'/odom', Odometry, self.odom_callback)
-        self.Main()
+        self.stable_move()
         rospy.spin()
     
-    def Main(self):
+    def stable_move(self):
+        while 1:
+            self.CarMove(0,0.1*pi)
         while self.pose.position.y < 3:
             # print(self.pose.position.y)
             self.CarMove(1, 0)
-            rospy.sleep(0.5)
+            # rospy.sleep(0.5)
         self.CarMove(0, 0)
         rospy.loginfo("Racecar reached, stop!")
 
@@ -42,6 +46,25 @@ class NavigateDemo:
         self.CarMove(0, 0)
         rospy.logwarn("Catched interrupt signal! Stop and exit...")
         exit()
+
+    # ============== the CV part ==================
+    def imagesubCallback(data):
+        try:
+            bridge_ = CvBridge()
+            #将sensor_msgs/Image类型的消息转化为BGR格式图像
+            orgFrame_ = bridge_.imgmsg_to_cv2(data, 'bgr8')
+            #打印图像尺寸
+            orgFrame_copy = orgFrame_.copy()
+            print("size of raw image: ",orgFrame_copy.shape)
+            #在原始图像上画出矩形框
+            cv2.rectangle(orgFrame_copy, (100,100), (500,300), (255,0,0), 2)
+            # 图像显示
+            cv2.imshow('redpoint',orgFrame_copy)
+            cv2.waitKey(0)
+
+        except CvBridgeError as err:
+            print(err)
+
 
 if __name__ == '__main__':
     rospy.init_node("cross_demo_node")
