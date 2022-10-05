@@ -21,6 +21,8 @@ class MoveDemo:
         self.image_sub_ = rospy.Subscriber("/AKM_1/camera/rgb/image_raw", Image, self.imagesubCallback)
         self.listener = tf.TransformListener()
         self.show = False
+        self.ball = ['blue','red','yellow']
+        self.ball_num = 0
         self.move_procedure = [(0.5,0,11),(0.3,-0.6,3),(0.5,0,14),(0.3,0.6,3),(0.5,0,16),'show', 
         (0.3,0.6,3),(0.5,0,6),(0.3,-0.6,3),(0.5,0,10),(0.3,0.6,3),(0.5,0,4),(0.3,0.6,4),(0.5,0,2),'show',
         (0.3,-0.6,4),(0.5,0,8),(0.3,0.6,4),(0.5,0,18),(0.4,0.8,3),(0.5,0,5),'show',
@@ -35,16 +37,18 @@ class MoveDemo:
                 self.show = True
             else:
                 self.move(item[0],item[1],item[2])
+                print(self.pose.position.x,self.pose.position.y)
         
     def move(self,x,z,time):
         for cnt in range(time):
             self.CarMove(x, z)
-            rospy.sleep(0.2)
+            rospy.sleep(0.5)
         self.CarMove(0, 0)
         rospy.loginfo("Racecar reached, stop!")
 
     def imagesubCallback(self,data):
         if self.show == True:
+            print("photo")
             try:
                 bridge_ = CvBridge()
                 #将sensor_msgs/Image类型的消息转化为BGR格式图像
@@ -55,9 +59,10 @@ class MoveDemo:
             #在原始图像上画出矩形框
                 # cv2.rectangle(orgFrame_copy, (100,100), (500,300), (255,0,0), 2)
             #将BGR图像再转换为sensor_msgs/Image消息格式发布
-                cv2.imshow('ball!', orgFrame_copy)
+                cv2.imshow(self.ball[self.ball_num], orgFrame_copy)
                 cv2.waitKey(0)
-                self.takephoto = False
+                self.show = False
+                self.ball_num = self.ball_num +1
 
             except CvBridgeError as err:
                 print(err)
