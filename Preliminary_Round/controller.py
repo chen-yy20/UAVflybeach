@@ -36,7 +36,7 @@ class ControllerNode:
         self.t_wu_ = np.zeros([3], dtype=np.float64)
 
         self.image_ = None
-        self.color_range_ = [(0, 43, 46), (6, 255, 255)] # 红色的HSV范围
+        self.color_range_ = [(0, 43, 46), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
         self.bridge_ = CvBridge()
 
         self.flight_state_ = self.FlightState.WAITING
@@ -68,34 +68,36 @@ class ControllerNode:
             rospy.logwarn('State: WAITING')
             # the movement command format
             self.publishCommand('takeoff')
-            self.navigating_queue_ = deque([['y', 1.8]])
+            self.navigating_queue_ = deque([['y', 1.8]]) # 设置目标y坐标为1.8m
             self.switchNavigatingState()
             self.next_state_ = self.FlightState.DETECTING_TARGET
 
         elif self.flight_state_ == self.FlightState.NAVIGATING:
             rospy.logwarn('State: NAVIGATING')
             # 如果yaw与90度相差超过正负10度，需要进行旋转调整yaw
+            # 先不要管四元数的原理了，只需要用这一行转换为欧拉角，yaw对应偏航，pitch对应俯仰，roll对应翻滚，我们只需要调整偏航
+            # 飞机头指向y轴，为90°
             (yaw, pitch, roll) = self.R_wu_.as_euler('zyx', degrees=True)
+
+            # TODO: 此处只需要调整raw_diff来控制机身旋转，不过需要搞清楚角度到底是怎么计算的，理论上无人机在巡航阶段的移动不需要转向
             yaw_diff = yaw - 90 if yaw > -90 else yaw + 270
             if yaw_diff > 10:  # clockwise
                 self.publishCommand('cw %d' % (int(yaw_diff) if yaw_diff > 15 else 15))
                 return
             elif yaw_diff < -10:  # counterclockwise
-                # TODO 1: 发布相应的tello控制命令
                 self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -15 else 15))
                 return
-                # end of TODO 1
 
             dim_index = 0 if self.navigating_dimension_ == 'x' else (1 if self.navigating_dimension_ == 'y' else 2)
+            # 也是看目标点与当前位置在对应维度下的坐标差异
             dist = self.navigating_destination_ - self.t_wu_[dim_index]
             if abs(dist) < 0.3:  # 当前段导航结束
                 self.switchNavigatingState()
             else:
                 dir_index = 0 if dist > 0 else 1  # direction index
-                # TODO 2: 根据维度（dim_index）和导航方向（dir_index）决定使用哪个命令
+                # 根据维度（dim_index）和导航方向（dir_index）决定使用哪个命令
                 command_matrix = [['right ', 'left '], ['forward ', 'back '], ['up ', 'down ']]
                 command = command_matrix[dim_index][dir_index]
-                # end of TODO 2
                 if abs(dist) > 1.5:
                     self.publishCommand(command+'100')
                 else:
@@ -103,6 +105,7 @@ class ControllerNode:
 
         elif self.flight_state_ == self.FlightState.DETECTING_TARGET:
             rospy.logwarn('State: DETECTING_TARGET')
+            # TODO: 此处不同的目标有不同的表示高度和角度，需要在此阶段进行调整
             # 如果无人机飞行高度与标识高度（1.75m）相差太多，则需要进行调整
             if self.t_wu_[2] > 2.0:
                 self.publishCommand('down %d' % int(100*(self.t_wu_[2] - 1.75)))
@@ -120,13 +123,13 @@ class ControllerNode:
                 self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -15 else 15))
                 return
 
+            # TODO: 识别到小球，需要写发送检测结果的方法，如何发送？
             if self.detectTarget():
-                #rospy.loginfo('Target detected.')
+                rospy.loginfo('Target detected.')
                 # 根据无人机当前x坐标判断正确的窗口是哪一个
-                # 实际上可以结合目标在图像中的位置和相机内外参数得到标记点较准确的坐标，这需要相机成像的相关知识
-                # 此处仅仅是做了一个粗糙的估计
                 win_dist = [abs(self.t_wu_[0]-win_x) for win_x in self.window_x_list_]
                 win_index = win_dist.index(min(win_dist))  # 正确的窗户编号
+                # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=5m，移动到降落位置x=7m
                 self.navigating_queue_ = deque([['y', 2.4], ['z', 1.0], ['x', self.window_x_list_[win_index]], ['y', 5.0], ['x', 7.0]])  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
                 self.next_state_ = self.FlightState.LANDING
@@ -149,11 +152,10 @@ class ControllerNode:
             self.flight_state_ = self.next_state_
         else: # 从队列头部取出无人机下一次导航的状态信息
             next_nav = self.navigating_queue_.popleft()
-            # TODO 3: 更新导航信息和飞行状态
             self.navigating_dimension_ = next_nav[0]
-            self.navigating_destination_ = next_nav[1]
-            self.flight_state_ = self.FlightState.NAVIGATING
-            # end of TODO 3
+            self.navigating_destination_ = next_nav[1] # 更新新的目标航点，一次只更新一个维度
+            self.flight_state_ = self.FlightState.NAVIGATING # 切换到巡航状态
+
 
     # 判断是否检测到目标
     def detectTarget(self):
