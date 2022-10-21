@@ -8,7 +8,7 @@
 
 图1  比赛场地示意图
 
-<img src=".\UAVflybeach\Preliminary_Round\arena.png" alt="image-20221021233435005" style="zoom:67%;" />
+<img src=".\arena.png" alt="image-20221021233435005" style="zoom:67%;" />
 
 | 位置编号 | x    | y    | z    | 位置描述                               |
 | -------- | ---- | ---- | ---- | -------------------------------------- |
