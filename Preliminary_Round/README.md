@@ -18,3 +18,6 @@
 | 4        | 4    | 11   | *    | 位于一个木制四层柜子（一层或者四层）   |
 | 5        | 1    | 14.5 | 0.2  | 位于墙角处                             |
 
+`roslaunch uav_sim arena_with_car.launch` 
+
+

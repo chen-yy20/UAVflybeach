@@ -50,12 +50,14 @@ class ControllerNode:
         self.is_begin_ = False
 
         self.commandPub_ = rospy.Publisher('/tello/cmd_string', String, queue_size=100)  # 发布tello格式控制信号
+        # 无人机与无人车通信例程
+        self.strPub_ = rospy.Publisher('/target_result',String,queue_size=100)
 
         self.poseSub_ = rospy.Subscriber('/tello/states', PoseStamped, self.poseCallback)  # 接收处理含噪无人机位姿信息
         self.imageSub_ = rospy.Subscriber('/iris/usb_cam/image_raw', Image, self.imageCallback)  # 接收摄像头图像
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始飞行的命令
 
-        rate = rospy.Rate(0.3)
+        rate = rospy.Rate(0.2) # 原本为0.3，尝试增加刷新率
         while not rospy.is_shutdown():
             if self.is_begin_:
                 self.decision()
@@ -80,28 +82,54 @@ class ControllerNode:
             (yaw, pitch, roll) = self.R_wu_.as_euler('zyx', degrees=True)
 
             # TODO: 此处只需要调整raw_diff来控制机身旋转，不过需要搞清楚角度到底是怎么计算的，理论上无人机在巡航阶段的移动不需要转向
-            yaw_diff = yaw - 90 if yaw > -90 else yaw + 270
-            if yaw_diff > 10:  # clockwise
-                self.publishCommand('cw %d' % (int(yaw_diff) if yaw_diff > 15 else 15))
-                return
-            elif yaw_diff < -10:  # counterclockwise
-                self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -15 else 15))
-                return
+            # yaw_diff = yaw - 90 if yaw > -90 else yaw + 270
+            # if yaw_diff > 10:  # clockwise
+            #     self.publishCommand('cw %d' % (int(yaw_diff) if yaw_diff > 15 else 15))
+            #     return
+            # elif yaw_diff < -10:  # counterclockwise
+            #     self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -15 else 15))
+            #     return
 
-            dim_index = 0 if self.navigating_dimension_ == 'x' else (1 if self.navigating_dimension_ == 'y' else 2)
+            # dim_index = 0 if self.navigating_dimension_ == 'x' else (1 if self.navigating_dimension_ == 'y' else 2
+            if self.navigating_dimension_ == 'x':
+                dim_index = 0
+            elif self.navigating_dimension_== 'y':
+                dim_index = 1
+            elif self.navigating_dimension_== 'z':
+                dim_index = 2
+            elif self.navigating_dimension_== 'r': # 设置r为角度的改变
+                dim_index = 3
+
+
             # 也是看目标点与当前位置在对应维度下的坐标差异
-            dist = self.navigating_destination_ - self.t_wu_[dim_index]
-            if abs(dist) < 0.3:  # 当前段导航结束
-                self.switchNavigatingState()
-            else:
-                dir_index = 0 if dist > 0 else 1  # direction index
-                # 根据维度（dim_index）和导航方向（dir_index）决定使用哪个命令
-                command_matrix = [['right ', 'left '], ['forward ', 'back '], ['up ', 'down ']]
-                command = command_matrix[dim_index][dir_index]
-                if abs(dist) > 1.5:
-                    self.publishCommand(command+'100')
+            if dim_index != 3:
+                dist = self.navigating_destination_ - self.t_wu_[dim_index]
+                if abs(dist) < 0.3:  # 当前段导航结束
+                    self.switchNavigatingState()
                 else:
-                    self.publishCommand(command+str(int(abs(100*dist))))
+                    dir_index = 0 if dist > 0 else 1  # direction index
+                    # 根据维度（dim_index）和导航方向（dir_index）决定使用哪个命令
+                    command_matrix = [['right ', 'left '], ['forward ', 'back '], ['up ', 'down ']]
+                    command = command_matrix[dim_index][dir_index]
+                    if abs(dist) > 4:
+                        self.publishCommand(command+'300')
+                    else:
+                        self.publishCommand(command+str(int(abs(100*dist))))
+            else:
+               # TODO: 此处只需要调整raw_diff来控制机身旋转，y轴方向为+90°
+                angle = self.navigating_destination_
+                print("Euler:",str(yaw),str(pitch),str(roll))
+                yaw_diff = yaw - angle if yaw > -angle else yaw + 360-angle
+                if abs(yaw_diff) < 10:  # 当前段导航结束
+                    self.switchNavigatingState()
+                else:
+                    if yaw_diff > 10:  # clockwise
+                        self.publishCommand('cw %d' % (int(yaw_diff) if yaw_diff > 50 else 50))
+                        return
+                    elif yaw_diff < -10:  # counterclockwise
+                        self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -50 else 50))
+                        return
+    
 
         elif self.flight_state_ == self.FlightState.DETECTING_TARGET:
             rospy.logwarn('State: DETECTING_TARGET')
@@ -123,14 +151,15 @@ class ControllerNode:
                 self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -15 else 15))
                 return
 
-            # TODO: 识别到小球，需要写发送检测结果的方法，如何发送？
+            #  TODO：向裁判机特定话题发送检测结果
             if self.detectTarget():
                 rospy.loginfo('Target detected.')
                 # 根据无人机当前x坐标判断正确的窗口是哪一个
                 win_dist = [abs(self.t_wu_[0]-win_x) for win_x in self.window_x_list_]
                 win_index = win_dist.index(min(win_dist))  # 正确的窗户编号
-                # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=5m，移动到降落位置x=7m
-                self.navigating_queue_ = deque([['y', 2.4], ['z', 1.0], ['x', self.window_x_list_[win_index]], ['y', 5.0], ['x', 7.0]])  # 通过窗户并导航至终点上方
+                # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=4m，移动到降落位置x=7m
+                # 穿过窗户以后，移动到第一个观察点的位置，见arena.png
+                self.navigating_queue_ = deque([['y', 2.4], ['z', 1.0], ['x', self.window_x_list_[win_index]], ['y', 4.0], ['z',3.5],['y',13],['x',7],['z',3.0],['r',-90]])  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
                 self.next_state_ = self.FlightState.LANDING
             else:
@@ -143,6 +172,12 @@ class ControllerNode:
         elif self.flight_state_ == self.FlightState.LANDING:
             rospy.logwarn('State: LANDING')
             self.publishCommand('land')
+
+            # 在landing阶段向无人车发布自己观察到的结果
+            result = String()
+            result.data = "rbgee" # 注意需要以这种方式打包一下result
+
+            self.strPub_.publish(result)
         else:
             pass
 
@@ -151,9 +186,11 @@ class ControllerNode:
         if len(self.navigating_queue_) == 0:
             self.flight_state_ = self.next_state_
         else: # 从队列头部取出无人机下一次导航的状态信息
+ 
             next_nav = self.navigating_queue_.popleft()
+            print("next_nav:",next_nav)
             self.navigating_dimension_ = next_nav[0]
-            self.navigating_destination_ = next_nav[1] # 更新新的目标航点，一次只更新一个维度
+            self.navigating_destination_ = next_nav[1] # 更新新的目标航点，一次只更新一个维
             self.flight_state_ = self.FlightState.NAVIGATING # 切换到巡航状态
 
 
