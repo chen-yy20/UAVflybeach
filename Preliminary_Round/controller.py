@@ -24,7 +24,7 @@ class ControllerNode:
     class FlightState(Enum):  # 飞行状态
         WAITING = 1
         NAVIGATING = 2
-        DETECTING_TARGET = 3
+        DETECTING_WINDOW = 3
         LANDING = 4
 
     def __init__(self):
@@ -49,6 +49,8 @@ class ControllerNode:
 
         self.is_begin_ = False
 
+        self.window_index = 0
+
         self.commandPub_ = rospy.Publisher('/tello/cmd_string', String, queue_size=100)  # 发布tello格式控制信号
         # 无人机与无人车通信例程
         self.strPub_ = rospy.Publisher('/target_result',String,queue_size=100)
@@ -57,7 +59,7 @@ class ControllerNode:
         self.imageSub_ = rospy.Subscriber('/iris/usb_cam/image_raw', Image, self.imageCallback)  # 接收摄像头图像
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始飞行的命令
 
-        rate = rospy.Rate(0.2) # 原本为0.3，尝试增加刷新率
+        rate = rospy.Rate(0.3)
         while not rospy.is_shutdown():
             if self.is_begin_:
                 self.decision()
@@ -70,9 +72,9 @@ class ControllerNode:
             rospy.logwarn('State: WAITING')
             # the movement command format
             self.publishCommand('takeoff')
-            self.navigating_queue_ = deque([['y', 1.8]]) # 设置目标y坐标为1.8m
+            self.navigating_queue_ = deque([['z',1.75],['y', 1.8],['x',1.75]]) # 飞到第一个着火点前面
             self.switchNavigatingState()
-            self.next_state_ = self.FlightState.DETECTING_TARGET
+            self.next_state_ = self.FlightState.DETECTING_WINDOW
 
         elif self.flight_state_ == self.FlightState.NAVIGATING:
             rospy.logwarn('State: NAVIGATING')
@@ -116,23 +118,23 @@ class ControllerNode:
                     else:
                         self.publishCommand(command+str(int(abs(100*dist))))
             else:
-               # TODO: 此处只需要调整raw_diff来控制机身旋转，y轴方向为+90°
                 angle = self.navigating_destination_
                 print("Euler:",str(yaw),str(pitch),str(roll))
-                yaw_diff = yaw - angle if yaw > -angle else yaw + 360-angle
-                if abs(yaw_diff) < 10:  # 当前段导航结束
+                yaw = yaw+360 if yaw <0 else yaw
+                yaw_diff = yaw - angle
+                if abs(yaw_diff) < 10 or abs(yaw_diff-360)<10:  # 当前段导航结束
                     self.switchNavigatingState()
                 else:
-                    if yaw_diff > 10:  # clockwise
-                        self.publishCommand('cw %d' % (int(yaw_diff) if yaw_diff > 50 else 50))
+                    if yaw_diff  > 0:  # clockwise
+                        self.publishCommand('cw %d' % (int(yaw_diff)))
                         return
-                    elif yaw_diff < -10:  # counterclockwise
-                        self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -50 else 50))
+                    elif yaw_diff < 0:  # counterclockwise
+                        self.publishCommand('ccw %d' % (int(-yaw_diff)))
                         return
     
 
-        elif self.flight_state_ == self.FlightState.DETECTING_TARGET:
-            rospy.logwarn('State: DETECTING_TARGET')
+        elif self.flight_state_ == self.FlightState.DETECTING_WINDOW:
+            rospy.logwarn('State: DETECTING_WINDOW')
             # TODO: 此处不同的目标有不同的表示高度和角度，需要在此阶段进行调整
             # 如果无人机飞行高度与标识高度（1.75m）相差太多，则需要进行调整
             if self.t_wu_[2] > 2.0:
@@ -153,13 +155,13 @@ class ControllerNode:
 
             #  TODO：向裁判机特定话题发送检测结果
             if self.detectTarget():
-                rospy.loginfo('Target detected.')
                 # 根据无人机当前x坐标判断正确的窗口是哪一个
                 win_dist = [abs(self.t_wu_[0]-win_x) for win_x in self.window_x_list_]
                 win_index = win_dist.index(min(win_dist))  # 正确的窗户编号
+                print('Window detected:',str(win_index))
                 # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=4m，移动到降落位置x=7m
                 # 穿过窗户以后，移动到第一个观察点的位置，见arena.png
-                self.navigating_queue_ = deque([['y', 2.4], ['z', 1.0], ['x', self.window_x_list_[win_index]], ['y', 4.0], ['z',3.5],['y',13],['x',7],['z',3.0],['r',-90]])  # 通过窗户并导航至终点上方
+                self.navigating_queue_ = deque([['z', 1.0], ['x', self.window_x_list_[win_index]], ['y', 4.0], ['z',3.5],['y',13],['x',7],['z',3.0],['r',-120]])  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
                 self.next_state_ = self.FlightState.LANDING
             else:
@@ -167,7 +169,13 @@ class ControllerNode:
                     rospy.loginfo('Detection failed, ready to land.')
                     self.flight_state_ = self.FlightState.LANDING
                 else:  # 向右侧平移一段距离，继续检测
-                    self.publishCommand('right 75')
+                #     self.publishCommand('right 75')
+                    self.window_index += 1
+                    print(self.window_x_list_,self.t_wu_)
+                    dis = abs(self.window_x_list_[self.window_index]-self.t_wu_[0])
+                    print("窗户{}没有着火。右移{}米".format(self.window_index,dis))
+                   
+                    self.publishCommand('right %d' % (int(100*dis)))
 
         elif self.flight_state_ == self.FlightState.LANDING:
             rospy.logwarn('State: LANDING')
@@ -196,6 +204,7 @@ class ControllerNode:
 
     # 判断是否检测到目标
     def detectTarget(self):
+        print("开始检测目标")
         if self.image_ is None:
             return False
         image_copy = self.image_.copy()
@@ -230,6 +239,7 @@ class ControllerNode:
 
     # 向相关topic发布tello命令
     def publishCommand(self, command_str):
+        print("发布指令：",command_str)
         msg = String()
         msg.data = command_str
         self.commandPub_.publish(msg)
@@ -254,4 +264,3 @@ class ControllerNode:
 
 if __name__ == '__main__':
     cn = ControllerNode()
-
