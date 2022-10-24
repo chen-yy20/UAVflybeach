@@ -64,8 +64,7 @@ class ControllerNode:
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始飞行的命令
 
         # ================ 航点数组 ================
-        self.navigate_cross_window = [['z', 1.0], ['x', self.window_x_list_[self.window_index]], ['y', 4.0]]
-        self.navigate_queue_1 = [['z',3.5],['x',1.5],['y',7.2],['r',0],['z',2.7]]
+        self.navigate_queue_1 = [['z',3.5],['x',1.5],['y',7.2],['r',0],['z',1.8]]
         self.navigate_queue_2 = [['r',90],['z',3.5],['y',14],['x',7],['z',3.0],['r',-120]]
 
 
@@ -171,7 +170,7 @@ class ControllerNode:
                 print('Window detected:',str(self.window_index))
                 # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=4m，移动到降落位置x=7m
                 # 穿过窗户以后，移动到第一个观察点的位置，见arena.png
-                self.navigating_queue_ = deque(self.navigate_cross_window)  # 通过窗户并导航至终点上方
+                self.navigating_queue_ = deque([['z', 1.0], ['x', self.window_x_list_[self.window_index]], ['y', 4.0]])  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
                 self.next_state_ = self.FlightState.GOTO_BALL_1
             else:
@@ -181,7 +180,7 @@ class ControllerNode:
                 else:  # 向右侧平移一段距离，继续检测
                 #     self.publishCommand('right 75')
                     print(self.window_x_list_,self.t_wu_)
-                    dis = abs(self.window_x_list_[self.window_index]-self.t_wu_[0])
+                    dis = abs(self.window_x_list_[self.window_index+1]-self.t_wu_[0])
                     print("窗户{}没有着火。右移{}米".format(self.window_index,dis))
                     self.window_index += 1
                    
@@ -194,14 +193,14 @@ class ControllerNode:
             self.next_state_ = self.FlightState.DETECTING_BALL_1
 
         elif self.flight_state_ == self.FlightState.DETECTING_BALL_1:
-             rospy.logwarn('State: DETECTING_BALL_1')
+            rospy.logwarn('State: DETECTING_BALL_1')
             self.detect_ball_1()
             self.next_state_ = self.FlightState.GOTO_BALL_2
             self.switchNavigatingState()
             
         
         elif self.flight_state_ == self.FlightState.GOTO_BALL_2:
-             rospy.logwarn('State: GOTO_BALL_2')
+            rospy.logwarn('State: GOTO_BALL_2')
             self.navigating_queue_ = deque(self.navigate_queue_2)
             self.switchNavigatingState()
             self.next_state_ = self.FlightState.DETECTING_BALL_2
