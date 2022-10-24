@@ -25,7 +25,11 @@ class ControllerNode:
         WAITING = 1
         NAVIGATING = 2
         DETECTING_WINDOW = 3
-        LANDING = 4
+        GOTO_BALL_1 = 4
+        DETECTING_BALL_1 = 5
+        GOTO_BALL_2 = 6
+        DETECTING_BALL_2 = 7
+        LANDING = 8
 
     def __init__(self):
         rospy.init_node('controller_node', anonymous=True)
@@ -58,6 +62,12 @@ class ControllerNode:
         self.poseSub_ = rospy.Subscriber('/tello/states', PoseStamped, self.poseCallback)  # 接收处理含噪无人机位姿信息
         self.imageSub_ = rospy.Subscriber('/iris/usb_cam/image_raw', Image, self.imageCallback)  # 接收摄像头图像
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始飞行的命令
+
+        # ================ 航点数组 ================
+        self.navigate_cross_window = [['z', 1.0], ['x', self.window_x_list_[self.window_index]], ['y', 4.0]]
+        self.navigate_queue_1 = [['z',3.5],['x',1.5],['y',7.2],['r',0],['z',2.7]]
+        self.navigate_queue_2 = [['r',90],['z',3.5],['y',14],['x',7],['z',3.0],['r',-120]]
+
 
         rate = rospy.Rate(0.3)
         while not rospy.is_shutdown():
@@ -156,26 +166,52 @@ class ControllerNode:
             #  TODO：向裁判机特定话题发送检测结果
             if self.detectTarget():
                 # 根据无人机当前x坐标判断正确的窗口是哪一个
-                win_dist = [abs(self.t_wu_[0]-win_x) for win_x in self.window_x_list_]
-                win_index = win_dist.index(min(win_dist))  # 正确的窗户编号
-                print('Window detected:',str(win_index))
+                # win_dist = [abs(self.t_wu_[0]-win_x) for win_x in self.window_x_list_]
+                # win_index = win_dist.index(min(win_dist))  # 正确的窗户编号
+                print('Window detected:',str(self.window_index))
                 # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=4m，移动到降落位置x=7m
                 # 穿过窗户以后，移动到第一个观察点的位置，见arena.png
-                self.navigating_queue_ = deque([['z', 1.0], ['x', self.window_x_list_[win_index]], ['y', 4.0], ['z',3.5],['y',13],['x',7],['z',3.0],['r',-120]])  # 通过窗户并导航至终点上方
+                self.navigating_queue_ = deque(self.navigate_cross_window)  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
-                self.next_state_ = self.FlightState.LANDING
+                self.next_state_ = self.FlightState.GOTO_BALL_1
             else:
                 if self.t_wu_[0] > 7.5:
                     rospy.loginfo('Detection failed, ready to land.')
                     self.flight_state_ = self.FlightState.LANDING
                 else:  # 向右侧平移一段距离，继续检测
                 #     self.publishCommand('right 75')
-                    self.window_index += 1
                     print(self.window_x_list_,self.t_wu_)
                     dis = abs(self.window_x_list_[self.window_index]-self.t_wu_[0])
                     print("窗户{}没有着火。右移{}米".format(self.window_index,dis))
+                    self.window_index += 1
                    
                     self.publishCommand('right %d' % (int(100*dis)))
+
+        elif self.flight_state_ == self.FlightState.GOTO_BALL_1:
+            rospy.logwarn('State: GOTO_BALL_1')
+            self.navigating_queue_ = deque(self.navigate_queue_1)
+            self.switchNavigatingState()
+            self.next_state_ = self.FlightState.DETECTING_BALL_1
+
+        elif self.flight_state_ == self.FlightState.DETECTING_BALL_1:
+             rospy.logwarn('State: DETECTING_BALL_1')
+            self.detect_ball_1()
+            self.next_state_ = self.FlightState.GOTO_BALL_2
+            self.switchNavigatingState()
+            
+        
+        elif self.flight_state_ == self.FlightState.GOTO_BALL_2:
+             rospy.logwarn('State: GOTO_BALL_2')
+            self.navigating_queue_ = deque(self.navigate_queue_2)
+            self.switchNavigatingState()
+            self.next_state_ = self.FlightState.DETECTING_BALL_2
+
+        elif self.flight_state_ == self.FlightState.DETECTING_BALL_2:
+            rospy.logwarn('State: DETECTING_BALL_2')
+            self.detect_ball_2()
+            self.next_state_ = self.FlightState.LANDING
+            self.switchNavigatingState()
+
 
         elif self.flight_state_ == self.FlightState.LANDING:
             rospy.logwarn('State: LANDING')
@@ -236,6 +272,15 @@ class ControllerNode:
             if contour_area_max > 50:
                 return True
         return False
+
+    # TODO： 检测小球的颜色函数
+    def detect_ball_1(self):
+        print("到达检测点1，开始检测")
+
+    
+    def detect_ball_2(self):
+        print("到达监测点2，开始检测")
+
 
     # 向相关topic发布tello命令
     def publishCommand(self, command_str):
