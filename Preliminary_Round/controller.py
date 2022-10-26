@@ -64,7 +64,7 @@ class ControllerNode:
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始飞行的命令
 
         # ================ 航点数组 ================
-        self.navigate_queue_1 = [['z',3.5],['x',1.5],['y',7.2],['r',0],['z',1.8]]
+        self.navigate_queue_1 = [['z',3.5],['x',1.5],['y',7.2],['r',0],['z',1.75]]
         self.navigate_queue_2 = [['r',90],['z',3.5],['y',14],['x',7],['z',3.0],['r',-120]]
 
 
