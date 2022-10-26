@@ -57,15 +57,18 @@ class ControllerNode:
 
         self.commandPub_ = rospy.Publisher('/tello/cmd_string', String, queue_size=100)  # 发布tello格式控制信号
         # 无人机与无人车通信例程
-        self.strPub_ = rospy.Publisher('/target_result',String,queue_size=100)
+        self.BallRcv_ = rospy.Subscriber('/detect_result',String,self.rcvCallback) # 接收来自小车的小球消息
+        self.skip_1 = False
 
         self.poseSub_ = rospy.Subscriber('/tello/states', PoseStamped, self.poseCallback)  # 接收处理含噪无人机位姿信息
         self.imageSub_ = rospy.Subscriber('/iris/usb_cam/image_raw', Image, self.imageCallback)  # 接收摄像头图像
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始飞行的命令
 
+
+
         # ================ 航点数组 ================
         self.navigate_queue_1 = [['z',3.5],['x',1.5],['y',7.2],['r',0],['z',1.75]]
-        self.navigate_queue_2 = [['r',90],['z',3.5],['y',14],['x',7],['z',3.0],['r',-120]]
+        self.navigate_queue_2 = [['z',3.5],['r',90],['y',15],['x',7],['z',3.0],['r',-120]]
 
 
         rate = rospy.Rate(0.3)
@@ -73,7 +76,7 @@ class ControllerNode:
             if self.is_begin_:
                 self.decision()
             rate.sleep()
-        rospy.logwarn('Controller node shut down.')
+        rospy.logwarn('UAV controller node shut down.')
 
     # 按照一定频率进行决策，并发布tello格式控制信号
     def decision(self):
@@ -81,7 +84,7 @@ class ControllerNode:
             rospy.logwarn('State: WAITING')
             # the movement command format
             self.publishCommand('takeoff')
-            self.navigating_queue_ = deque([['z',1.75],['y', 1.8],['x',1.75]]) # 飞到第一个着火点前面
+            self.navigating_queue_ = deque([['z',1.75],['y', 1.3],['x',1.75]]) # 飞到第一个着火点前面
             self.switchNavigatingState()
             self.next_state_ = self.FlightState.DETECTING_WINDOW
 
@@ -170,7 +173,7 @@ class ControllerNode:
                 print('Window detected:',str(self.window_index))
                 # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=4m，移动到降落位置x=7m
                 # 穿过窗户以后，移动到第一个观察点的位置，见arena.png
-                self.navigating_queue_ = deque([['z', 1.0], ['x', self.window_x_list_[self.window_index]], ['y', 4.0]])  # 通过窗户并导航至终点上方
+                self.navigating_queue_ = deque([['z', 1.0], ['x', self.window_x_list_[self.window_index]], ['r',90],['y', 4.0]])  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
                 self.next_state_ = self.FlightState.GOTO_BALL_1
             else:
@@ -187,10 +190,13 @@ class ControllerNode:
                     self.publishCommand('right %d' % (int(100*dis)))
 
         elif self.flight_state_ == self.FlightState.GOTO_BALL_1:
-            rospy.logwarn('State: GOTO_BALL_1')
-            self.navigating_queue_ = deque(self.navigate_queue_1)
-            self.switchNavigatingState()
-            self.next_state_ = self.FlightState.DETECTING_BALL_1
+            if not self.skip_1:
+                rospy.logwarn('State: GOTO_BALL_1')
+                self.navigating_queue_ = deque(self.navigate_queue_1)
+                self.switchNavigatingState()
+                self.next_state_ = self.FlightState.DETECTING_BALL_1
+            else:
+                self.flight_state_ = self.FlightState.GOTO_BALL_2
 
         elif self.flight_state_ == self.FlightState.DETECTING_BALL_1:
             rospy.logwarn('State: DETECTING_BALL_1')
@@ -301,6 +307,16 @@ class ControllerNode:
         except CvBridgeError as err:
             print(err)
 
+    def rcvCallback(self,msg):
+        print("收到小车信息：")
+        data = msg.data
+        print(data)
+
+        # 2号点非空，更改航线
+        if data[0] == '2' and data[1] != 'e':
+            print("2号点非空，更改航线")
+            self.skip_1 = True
+
     # 接收开始信号
     def startcommandCallback(self, msg):
         self.is_begin_ = msg.data
@@ -308,3 +324,4 @@ class ControllerNode:
 
 if __name__ == '__main__':
     cn = ControllerNode()
+

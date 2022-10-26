@@ -25,9 +25,20 @@ class CrossDemo:
         self.cmd_pub = rospy.Publisher(self.robot_name+'/cmd_vel', Twist, queue_size=1)
         self.odom_sub = rospy.Subscriber(self.robot_name+'/odom', Odometry, self.odom_callback)
         self.image_sub_ = rospy.Subscriber("/AKM_1/camera/rgb/image_raw", Image, self.imagesubCallback)
-        self.detect_pub = rospy.Publisher(self.robot_name+'/detect_result', String, queue_size=10)
-        self.Main()
-        rospy.spin()
+        self.detect_pub = rospy.Publisher('/detect_result', String, queue_size=10)
+
+        # ============ 订阅裁判机 =============
+        self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始的命令
+        self.is_begin_ = False
+    
+
+        # ============ 预备开始运行 ============
+        while not rospy.is_shutdown():
+            if self.is_begin_:
+                self.Main()
+                rospy.spin()
+        rospy.logwarn('Car Controller node shut down.')
+    
     
     def Main(self):
         detect_2 = None
@@ -327,6 +338,10 @@ class CrossDemo:
         self.CarMove(0, 0)
         rospy.logwarn("Catched interrupt signal! Stop and exit...")
         exit()
+
+        # 接收开始信号
+    def startcommandCallback(self, msg):
+        self.is_begin_ = msg.data
 
 if __name__ == '__main__':
     rospy.init_node("cross_demo_node")
