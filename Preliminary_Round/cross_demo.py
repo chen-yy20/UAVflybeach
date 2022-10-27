@@ -27,6 +27,9 @@ class CrossDemo:
         self.image_sub_ = rospy.Subscriber("/AKM_1/camera/rgb/image_raw", Image, self.imagesubCallback)
         self.detect_pub = rospy.Publisher('/detect_result', String, queue_size=10)
 
+        self.color_range_red = [(0, 240, 240), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
+        self.color_range_yellow = [(26, 43, 46), (34, 255, 255)] # 黄色
+        self.color_range_blue = [(100, 43, 48), (124, 255, 255)] # 蓝色
         # ============ 订阅裁判机 =============
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始的命令
         self.is_begin_ = False
@@ -68,21 +71,11 @@ class CrossDemo:
         self.Turn(-1, 18)
 
         # ------------------------------- detect=====================
-        rospy.sleep(2)
+        rospy.sleep(0.3)
+
         print("Start detecting......point 2")
-        if self.detect_ball_yellow():
-            detect_2 = '2y'
-            
-        elif self.detect_ball_red():
-            detect_2 = '2r'
-            
-        elif self.detect_ball_blue():
-            detect_2 = '2b'
-            
-        else:
-            detect_2 = '2e'
-        
-        print(detect_2)
+        detect_2 = '2'+self.detect_ball_wzh()        
+        print("point 2:"+detect_2)
         result.data = detect_2
         self.detect_pub.publish(result)
 
@@ -112,57 +105,49 @@ class CrossDemo:
             rospy.sleep(0.1)
         self.CarMove(0, 0)
         # ------------------------------- detect=====================
-        rospy.sleep(2)
-        print("Start detecting......point 4")
-        if self.detect_ball_yellow():
-            detect_4 = '4y'
-            
-        elif self.detect_ball_red():
-            detect_4 = '4r'
-            
-        elif self.detect_ball_blue():
-            detect_4 = '4b'
-            
-        else:
-            detect_4 = '4e'
+        rospy.sleep(0.3)
 
-        print(detect_4)
+        print("Start detecting......point 4")
+
+        detect_4 = '4'+self.detect_ball_wzh()  
+        print("point 4:"+detect_4)
         result.data = detect_4
         self.detect_pub.publish(result)
 
         # ------------------------------- 4 point
-        while self.pose.position.y < 13.3:
+        self.TurnB(1, 3)
+
+        while self.pose.position.y < 13.8:
             self.CarMove(-5, 0)
             rospy.sleep(0.1)
         
         self .CarMove(0, 0)
 
         # ------------------------------- turn right
-        self.TurnB(1, 17)
+        self.TurnB(1, 13)
 
-        while self.pose.position.x < 3.8:
-            self.CarMove(-5, 0)
+        while self.pose.position.x > 3:
+            self.CarMove(5, 0)
             rospy.sleep(0.1)
         
         self .CarMove(0, 0)
 
         # ------------------------------- detect=====================
+        rospy.sleep(0.3)
+
         print("Start detecting......point 5")
-        if self.detect_ball_yellow():
-            detect_5 = '5y'
-            
-        elif self.detect_ball_red():
-            detect_5 = '5r'
-            
-        elif self.detect_ball_blue():
-            detect_5 = '5b'
-            
-        else:
-            detect_5 = '5e'
-        
-        print(detect_5)
+        detect_5 = '5'+self.detect_ball_wzh()  
+        print("point 5:"+detect_5)
         result.data = detect_5
         self.detect_pub.publish(result)
+
+        # ------------------------------- land
+        while self.pose.position.x < 3.5:
+            self.CarMove(-5, 0)
+            rospy.sleep(0.1)
+        
+        self .CarMove(0, 0)
+
 
         rospy.loginfo("Racecar reached")
 
@@ -215,6 +200,53 @@ class CrossDemo:
         except CvBridgeError as err:
             print(err)
 
+    def detect_ball_wzh(self):
+        print("到达检测点1，开始检测")
+        if self.image_detect is None:
+            return 'n'
+        image_copy = self.image_detect.copy()
+        height = image_copy.shape[0]
+        width = image_copy.shape[1]
+        frame = cv2.resize(image_copy, (width, height), interpolation=cv2.INTER_CUBIC)  # 将图片缩放
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)  # 高斯模糊
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # 将图片转换到HSV空间
+        h, s, v = cv2.split(frame)  # 分离出各个HSV通道
+        v = cv2.equalizeHist(v)  # 直方图化
+        frame = cv2.merge((h, s, v))  # 合并三个通道
+
+
+        print('开始检测是否为黄球')
+
+        frame_yellow = cv2.inRange(frame, self.color_range_yellow[0], self.color_range_yellow[1])  # 对原图像和掩模进行位运算
+        dilated_yellow = cv2.dilate(frame_yellow, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_yellow = cv2.HoughCircles(dilated_yellow, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=5, maxRadius=100)
+        print(circles_yellow)
+        if circles_yellow is not None:
+            return 'y'
+
+
+        print('开始检测是否为红球')
+
+        frame_red = cv2.inRange(frame, self.color_range_red[0], self.color_range_red[1])  # 对原图像和掩模进行位运算
+        dilated_red = cv2.dilate(frame_red, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_red = cv2.HoughCircles(dilated_red, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=5, maxRadius=100)
+        print(circles_red)
+        if circles_red is not None:
+            return 'r'
+        
+
+        print('开始检测是否为蓝球')
+
+        frame_blue = cv2.inRange(frame, self.color_range_blue[0], self.color_range_blue[1])  # 对原图像和掩模进行位运算
+        dilated_blue = cv2.dilate(frame_blue, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_blue = cv2.HoughCircles(dilated_blue, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=5, maxRadius=100)
+        print(circles_blue)
+        if circles_blue is not None:
+
+            return 'b'
+
+        return 'e'
+
     def detect_ball(self):
         return (self.detect_ball_blue())or(self.detect_ball_red())or(self.detect_ball_())
 
@@ -254,7 +286,7 @@ class CrossDemo:
         return False
 
     def detect_ball_red(self):
-        color_range_ = [(3, 43, 46), (10, 255, 255)] # Red 的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
+        color_range_ = [(0, 250, 250), (2, 255, 255)] # Red 的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
 
         if self.image_detect is None:
             return False
