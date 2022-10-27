@@ -40,7 +40,10 @@ class ControllerNode:
         self.t_wu_ = np.zeros([3], dtype=np.float64)
 
         self.image_ = None
-        self.color_range_ = [(0, 43, 46), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
+        self.color_range_red = [(0, 43, 46), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
+        self.color_range_yellow = [(26, 43, 46), (34, 255, 255)] # 黄色
+        self.color_range_blue = [(100, 43, 48), (124, 255, 255)] # 蓝色
+        
         self.bridge_ = CvBridge()
 
         self.flight_state_ = self.FlightState.WAITING
@@ -48,6 +51,7 @@ class ControllerNode:
         self.navigating_dimension_ = None  # 'x' or 'y' or 'z'
         self.navigating_destination_ = None
         self.next_state_ = None  # 完成多段导航后将切换的飞行状态
+        self.result = ['e','e','e','e','e']
 
         self.window_x_list_ = [1.75, 4.25, 6.75] # 窗户中心点对应的x值
 
@@ -64,11 +68,15 @@ class ControllerNode:
         self.imageSub_ = rospy.Subscriber('/iris/usb_cam/image_raw', Image, self.imageCallback)  # 接收摄像头图像
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始飞行的命令
 
+        self.resultPub_ = rospy.Publisher('/target_result', String, queue_size=100)
+
 
 
         # ================ 航点数组 ================
-        self.navigate_queue_1 = [['z',3.5],['x',1.5],['y',7.2],['r',0],['z',1.75]]
-        self.navigate_queue_2 = [['z',3.5],['r',90],['y',15],['x',7],['z',3.0],['r',-120]]
+        self.navigate_queue_1 = [['z',3.5],['x',1.5],['r',90],['y',8.0],['z',1.9],['r',0]]
+        # self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14],['x',6.0],['r',-110],['z',2]]
+        self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14.5],['x',7.0],['z',3.0],['r',-120]]
+        self.navigate_queue_2_origin = [['z',3.7],['r',90],['y',14],['x',6.3],['r',-110],['z',2]]
 
 
         rate = rospy.Rate(0.3)
@@ -84,7 +92,7 @@ class ControllerNode:
             rospy.logwarn('State: WAITING')
             # the movement command format
             self.publishCommand('takeoff')
-            self.navigating_queue_ = deque([['z',1.75],['y', 1.3],['x',1.75]]) # 飞到第一个着火点前面
+            self.navigating_queue_ = deque([['z',1.65],['y',1.5],['x',1.75]]) # 飞到第一个航点
             self.switchNavigatingState()
             self.next_state_ = self.FlightState.DETECTING_WINDOW
 
@@ -93,18 +101,8 @@ class ControllerNode:
             # 如果yaw与90度相差超过正负10度，需要进行旋转调整yaw
             # 先不要管四元数的原理了，只需要用这一行转换为欧拉角，yaw对应偏航，pitch对应俯仰，roll对应翻滚，我们只需要调整偏航
             # 飞机头指向y轴，为90°
-            (yaw, pitch, roll) = self.R_wu_.as_euler('zyx', degrees=True)
+           
 
-            # TODO: 此处只需要调整raw_diff来控制机身旋转，不过需要搞清楚角度到底是怎么计算的，理论上无人机在巡航阶段的移动不需要转向
-            # yaw_diff = yaw - 90 if yaw > -90 else yaw + 270
-            # if yaw_diff > 10:  # clockwise
-            #     self.publishCommand('cw %d' % (int(yaw_diff) if yaw_diff > 15 else 15))
-            #     return
-            # elif yaw_diff < -10:  # counterclockwise
-            #     self.publishCommand('ccw %d' % (int(-yaw_diff) if yaw_diff < -15 else 15))
-            #     return
-
-            # dim_index = 0 if self.navigating_dimension_ == 'x' else (1 if self.navigating_dimension_ == 'y' else 2
             if self.navigating_dimension_ == 'x':
                 dim_index = 0
             elif self.navigating_dimension_== 'y':
@@ -117,6 +115,7 @@ class ControllerNode:
 
             # 也是看目标点与当前位置在对应维度下的坐标差异
             if dim_index != 3:
+                print("CURRENT POSITION:",self.t_wu_)
                 dist = self.navigating_destination_ - self.t_wu_[dim_index]
                 if abs(dist) < 0.3:  # 当前段导航结束
                     self.switchNavigatingState()
@@ -130,18 +129,26 @@ class ControllerNode:
                     else:
                         self.publishCommand(command+str(int(abs(100*dist))))
             else:
+                (yaw, pitch, roll) = self.R_wu_.as_euler('zyx', degrees=True)
                 angle = self.navigating_destination_
                 print("Euler:",str(yaw),str(pitch),str(roll))
                 yaw = yaw+360 if yaw <0 else yaw
+                angle = angle+360 if angle<0 else angle
                 yaw_diff = yaw - angle
-                if abs(yaw_diff) < 10 or abs(yaw_diff-360)<10:  # 当前段导航结束
+                if abs(yaw_diff) < 5 or abs(yaw_diff-360)<5:  # 当前段导航结束
                     self.switchNavigatingState()
                 else:
                     if yaw_diff  > 0:  # clockwise
                         self.publishCommand('cw %d' % (int(yaw_diff)))
+                        # if abs(yaw_diff)>40:
+                        #     rospy.sleep(1) # wait 1s
+                        #     self.publishCommand('back %d' % (50)) # 调整旋转导致的位姿偏移
                         return
                     elif yaw_diff < 0:  # counterclockwise
                         self.publishCommand('ccw %d' % (int(-yaw_diff)))
+                        # if abs(yaw_diff)>40:
+                        #     rospy.sleep(1)
+                        #     self.publishCommand('back %d' % (50)) # 调整旋转导致的位姿偏移
                         return
     
 
@@ -173,7 +180,7 @@ class ControllerNode:
                 print('Window detected:',str(self.window_index))
                 # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=4m，移动到降落位置x=7m
                 # 穿过窗户以后，移动到第一个观察点的位置，见arena.png
-                self.navigating_queue_ = deque([['z', 1.0], ['x', self.window_x_list_[self.window_index]], ['r',90],['y', 4.0]])  # 通过窗户并导航至终点上方
+                self.navigating_queue_ = deque([['z', 1.2], ['x', self.window_x_list_[self.window_index]], ['r',90],['y', 4.0]])  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
                 self.next_state_ = self.FlightState.GOTO_BALL_1
             else:
@@ -187,7 +194,7 @@ class ControllerNode:
                     print("窗户{}没有着火。右移{}米".format(self.window_index,dis))
                     self.window_index += 1
                    
-                    self.publishCommand('right %d' % (int(100*dis)))
+                    self.publishCommand('right %d' % (int(100*dis)-20))
 
         elif self.flight_state_ == self.FlightState.GOTO_BALL_1:
             if not self.skip_1:
@@ -207,12 +214,18 @@ class ControllerNode:
         
         elif self.flight_state_ == self.FlightState.GOTO_BALL_2:
             rospy.logwarn('State: GOTO_BALL_2')
-            self.navigating_queue_ = deque(self.navigate_queue_2)
+            if self.skip_1:
+                self.navigating_queue_ = deque(self.navigate_queue_2_new)
+            else:
+                self.navigating_queue_ = deque(self.navigate_queue_2_origin)
             self.switchNavigatingState()
             self.next_state_ = self.FlightState.DETECTING_BALL_2
 
         elif self.flight_state_ == self.FlightState.DETECTING_BALL_2:
             rospy.logwarn('State: DETECTING_BALL_2')
+            if self.skip_1:
+                rospy.sleep(3)
+                #self.publishCommand('right 90')
             self.detect_ball_2()
             self.next_state_ = self.FlightState.LANDING
             self.switchNavigatingState()
@@ -220,13 +233,17 @@ class ControllerNode:
 
         elif self.flight_state_ == self.FlightState.LANDING:
             rospy.logwarn('State: LANDING')
+            #self.publishCommand('back 100')
+            #rospy.sleep(5)
             self.publishCommand('land')
 
             # 在landing阶段向无人车发布自己观察到的结果
-            result = String()
-            result.data = "rbgee" # 注意需要以这种方式打包一下result
+            Result = String()
+            self.result = ''.join(self.result)
+            print('Result:', self.result)
+            Result.data = self.result # 注意需要以这种方式打包一下result
 
-            self.strPub_.publish(result)
+            self.resultPub_.publish(Result)
         else:
             pass
 
@@ -258,8 +275,8 @@ class ControllerNode:
         h, s, v = cv2.split(frame)  # 分离出各个HSV通道
         v = cv2.equalizeHist(v)  # 直方图化
         frame = cv2.merge((h, s, v))  # 合并三个通道
-
-        frame = cv2.inRange(frame, self.color_range_[0], self.color_range_[1])  # 对原图像和掩模进行位运算
+        color_range_red_for_fire = [(0, 43, 46), (6, 255, 255)]
+        frame = cv2.inRange(frame, color_range_red_for_fire[0], color_range_red_for_fire[1])  # 对原图像和掩模进行位运算
         opened = cv2.morphologyEx(frame, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))  # 开运算
         closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))  # 闭运算
         (image, contours, hierarchy) = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)  # 找出轮廓
@@ -281,10 +298,115 @@ class ControllerNode:
     # TODO： 检测小球的颜色函数
     def detect_ball_1(self):
         print("到达检测点1，开始检测")
+        if self.image_ is None:
+            return
+        image_copy = self.image_.copy()
+        
+        height = image_copy.shape[0]
+        width = image_copy.shape[1]
+        frame = cv2.resize(image_copy, (width, height), interpolation=cv2.INTER_CUBIC)  # 将图片缩放
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)  # 高斯模糊
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # 将图片转换到HSV空间
+        h, s, v = cv2.split(frame)  # 分离出各个HSV通道
+        v = cv2.equalizeHist(v)  # 直方图化
+        frame = cv2.merge((h, s, v))  # 合并三个通道
 
-    
+        print('开始检测是否为红球')
+        frame_red = cv2.inRange(frame, self.color_range_red[0], self.color_range_red[1])  # 对原图像和掩模进行位运算
+        dilated_red = cv2.dilate(frame_red, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_red = cv2.HoughCircles(dilated_red, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=8, maxRadius=100)
+        print(circles_red)
+        if circles_red is not None:
+            print('detected red')
+            self.result[1] = 'r'
+            return
+        
+        print('开始检测是否为黄球')
+        frame_yellow = cv2.inRange(frame, self.color_range_yellow[0], self.color_range_yellow[1])  # 对原图像和掩模进行位运算
+        dilated_yellow = cv2.dilate(frame_yellow, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_yellow = cv2.HoughCircles(dilated_yellow, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=8, maxRadius=100)
+        print(circles_yellow)
+        if circles_yellow is not None:
+            print('detected yellow')
+            self.result[1] = 'y'
+            return
+
+        print('开始检测是否为蓝球')
+        frame_blue = cv2.inRange(frame, self.color_range_blue[0], self.color_range_blue[1])  # 对原图像和掩模进行位运算
+        dilated_blue = cv2.dilate(frame_blue, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_blue = cv2.HoughCircles(dilated_blue, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=8, maxRadius=100)
+        print(circles_blue)
+        if circles_blue is not None:
+            print('detected blue')
+            self.result[1] = 'b'
+            return
+        print('detected empty')
+        return
+
+    # location 1.3.4
     def detect_ball_2(self):
+        if self.skip_1:
+            rospy.sleep(3)
         print("到达监测点2，开始检测")
+        
+        if self.image_ is None:
+            return
+        image_copy = self.image_.copy()
+        cv2.imshow('检测点2',image_copy)
+        cv2.waitKey(0)
+        height = image_copy.shape[0]
+        width = image_copy.shape[1]
+        frame = cv2.resize(image_copy, (width, height), interpolation=cv2.INTER_CUBIC)  # 将图片缩放
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)  # 高斯模糊
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # 将图片转换到HSV空间
+        h, s, v = cv2.split(frame)  # 分离出各个HSV通道
+        v = cv2.equalizeHist(v)  # 直方图化
+        frame = cv2.merge((h, s, v))  # 合并三个通道
+
+        print(frame.shape)
+
+        print('开始检测是否为红球')
+        frame_red = cv2.inRange(frame, self.color_range_red[0], self.color_range_red[1])  # 对原图像和掩模进行位运算
+        dilated_red = cv2.dilate(frame_red, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_red = cv2.HoughCircles(dilated_red, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=5, maxRadius=100)
+        print(circles_red)
+        if circles_red is not None:
+            print('detected red')
+            if circles_red[0][0][0] < 100 and self.result[0] == 'e':
+                self.result[0] = 'r'
+            elif circles_red[0][0][0] >= 100 and circles_red[0][0][0] < 200 and self.result[2] == 'e':
+                self.result[2] = 'r'
+            elif circles_red[0][0][0] >= 200 and self.result[3] == 'e':
+                self.result[3] = 'r'
+        
+        print('开始检测是否为黄球')
+        frame_yellow = cv2.inRange(frame, self.color_range_yellow[0], self.color_range_yellow[1])  # 对原图像和掩模进行位运算
+        dilated_yellow = cv2.dilate(frame_yellow, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_yellow = cv2.HoughCircles(dilated_yellow, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=5, maxRadius=100)
+        print(circles_yellow)
+        if circles_yellow is not None:
+            print('detected yellow')
+            if circles_yellow[0][0][0] < 100 and self.result[0] == 'e':
+                self.result[0] = 'y'
+            elif circles_yellow[0][0][0] >= 100 and circles_yellow[0][0][0] < 200 and self.result[2] == 'e':
+                self.result[2] = 'y'
+            elif circles_yellow[0][0][0] >= 200 and self.result[3] == 'e':
+                self.result[3] = 'y'
+
+        print('开始检测是否为蓝球')
+        frame_blue = cv2.inRange(frame, self.color_range_blue[0], self.color_range_blue[1])  # 对原图像和掩模进行位运算
+        dilated_blue = cv2.dilate(frame_blue, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2) # 膨胀
+        circles_blue = cv2.HoughCircles(dilated_blue, cv2.HOUGH_GRADIENT, 1, 100, param1=15, param2=7, minRadius=5, maxRadius=100)
+        print(circles_blue)
+        if circles_blue is not None:
+            print('detected blue')
+            if circles_blue[0][0][0] < 100 and self.result[0] == 'e':
+                self.result[0] = 'b'
+            elif circles_blue[0][0][0] >= 100 and circles_blue[0][0][0] < 200 and self.result[2] == 'e':
+                self.result[2] = 'b'
+            elif circles_blue[0][0][0] >= 200 and self.result[3] == 'e':
+                self.result[3] = 'b'
+        
 
 
     # 向相关topic发布tello命令
@@ -311,11 +433,13 @@ class ControllerNode:
         print("收到小车信息：")
         data = msg.data
         print(data)
-
+        self.result[int(data[0])-1] = data[1]
         # 2号点非空，更改航线
         if data[0] == '2' and data[1] != 'e':
             print("2号点非空，更改航线")
             self.skip_1 = True
+
+
 
     # 接收开始信号
     def startcommandCallback(self, msg):
