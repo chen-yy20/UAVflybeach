@@ -90,6 +90,7 @@ class ControllerNode:
     def decision(self):
         if self.flight_state_ == self.FlightState.WAITING:  # 起飞并飞至离墙体（y = 3.0m）适当距离的位置
             rospy.logwarn('State: WAITING')
+            print("NEWEST")
             # the movement command format
             self.publishCommand('takeoff')
             self.navigating_queue_ = deque([['z',1.65],['y',1.5],['x',1.75]]) # 飞到第一个航点
@@ -207,7 +208,7 @@ class ControllerNode:
                         if dis > 0:
                             self.publishCommand('right %d' % (int(100*dis)))
                         else :
-                            self.publishCommand('left %d' % (int(100*dis)))
+                            self.publishCommand('left %d' % (int(-100*dis)))
                         rospy.sleep(4)
                         print(self.t_wu_)
                         dis = self.window_x_list_[self.window_index]-self.t_wu_[0]
