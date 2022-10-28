@@ -74,11 +74,9 @@ class ControllerNode:
 
 
         # ================ 航点数组 ================
-        self.navigate_queue_1 = [['z',3.5],['x',1.5],['r',90],['y',8.0],['z',1.75],['r',0]]
-        # self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14],['x',6.0],['r',-110],['z',2]]
-        # self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14.5],['x',7.0],['z',3.0],['r',-120]]
-        self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14.5],['x',7.0],['r',-125],['m',[6.5,14,-120]],['z',2]]
-        self.navigate_queue_2_origin = [['z',3.7],['r',90],['y',14],['x',6.3],['r',-110],['z',2]]
+        self.navigate_queue_1 = [['z',3.5],['x',1.5],['r',90],['y',8.0],['r',0],['m',[1.5,8.0,0]],['z',1.75]]
+        self.navigate_queue_2_new = [['z',4],['r',90],['y',14],['x',6.5],['z',4],['r',-110],['m',[6.5,14,-110]],['z',2]]
+        self.navigate_queue_2_origin = [['z',3.7],['r',90],['y',14],['x',6.3],['r',-110],['m',[6.5,14,-110]],['z',2]]
 
 
         rate = rospy.Rate(0.3)
@@ -94,8 +92,8 @@ class ControllerNode:
             rospy.logwarn('State: WAITING')
             # the movement command format
             self.publishCommand('takeoff')
-            # self.navigating_queue_ = deque([['z',1.65],['y',1.5],['x',1.75]]) # 飞到第一个航点
-            self.navigating_queue_ = deque([['z',1.65],['m',[1.75,1.5,90]]]) # 飞到第一个航点
+            self.navigating_queue_ = deque([['z',1.65],['y',1.5],['x',1.75]]) # 飞到第一个航点
+            # self.navigating_queue_ = deque([['z',1.65],['m',[1.75,1.5,90]]]) # 飞到第一个航点
             self.switchNavigatingState()
             self.next_state_ = self.FlightState.DETECTING_WINDOW
 
@@ -192,7 +190,7 @@ class ControllerNode:
                 print('Window detected:',str(self.window_index))
                 # 移动到窗户前方0.6m，降低飞行高度为1m，移动到对应窗户的正中心，前进穿过窗户到y=4m，移动到降落位置x=7m
                 # 穿过窗户以后，移动到第一个观察点的位置，见arena.png
-                self.navigating_queue_ = deque([['z', 1.2], ['x', self.window_x_list_[self.window_index]], ['r',90],['y', 4.0]])  # 通过窗户并导航至终点上方
+                self.navigating_queue_ = deque([['z', 1], ['x', self.window_x_list_[self.window_index]], ['r',90],['y', 4.0]])  # 通过窗户并导航至终点上方
                 self.switchNavigatingState()
                 self.next_state_ = self.FlightState.GOTO_BALL_1
             else:
@@ -202,11 +200,18 @@ class ControllerNode:
                 else:  # 向右侧平移一段距离，继续检测
                 #     self.publishCommand('right 75')
                     print(self.window_x_list_,self.t_wu_)
-                    dis = abs(self.window_x_list_[self.window_index+1]-self.t_wu_[0])
+                    dis = self.window_x_list_[self.window_index+1]-self.t_wu_[0]
                     print("窗户{}没有着火。右移{}米".format(self.window_index,dis))
                     self.window_index += 1
-                   
-                    self.publishCommand('right %d' % (int(100*dis)-20))
+                    while(abs(dis)>0.3):
+                        if dis > 0:
+                            self.publishCommand('right %d' % (int(100*dis)))
+                        else :
+                            self.publishCommand('left %d' % (int(100*dis)))
+                        rospy.sleep(4)
+                        print(self.t_wu_)
+                        dis = self.window_x_list_[self.window_index]-self.t_wu_[0]
+
 
         elif self.flight_state_ == self.FlightState.GOTO_BALL_1:
             if not self.skip_1:
@@ -293,10 +298,10 @@ class ControllerNode:
         heng_arrive = False
 
         command = ""
-        if front >0.2:
+        if front >0.4:
             command = "forward "+str(int(100*front))
             self.publishCommand(command)
-        elif front <-0.2:
+        elif front <-0.4:
             command = "back "+str(int(100*-front))
             self.publishCommand(command)
         else:
@@ -305,10 +310,10 @@ class ControllerNode:
         rospy.sleep(2)
         command = ""
         heng = l*math.sin(delta_theta)
-        if heng >0.2:
+        if heng >0.4:
             command = "right "+str(int(100*heng))
             self.publishCommand(command)
-        elif heng <-0.2:
+        elif heng <-0.4:
             command = "left "+str(int(100*-heng))
             self.publishCommand(command)
         else:
@@ -321,7 +326,7 @@ class ControllerNode:
             target_yaw = 360+target_yaw if target_yaw<0 else target_yaw
             yaw_diff = target_yaw - theta
             print("YAW_DIFF:",yaw_diff)
-            if abs(yaw_diff)<5:
+            if abs(yaw_diff)<7:
                 print("CORRECT YAW DIFF:",yaw_diff)
                 return True
             elif yaw_diff>0:
