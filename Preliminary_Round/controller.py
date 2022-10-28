@@ -14,6 +14,7 @@ import rospy
 import cv2
 import numpy as np
 import math
+from math import pi
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Image
@@ -75,7 +76,8 @@ class ControllerNode:
         # ================ 航点数组 ================
         self.navigate_queue_1 = [['z',3.5],['x',1.5],['r',90],['y',8.0],['z',1.75],['r',0]]
         # self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14],['x',6.0],['r',-110],['z',2]]
-        self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14.5],['x',7.0],['z',3.0],['r',-120]]
+        # self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14.5],['x',7.0],['z',3.0],['r',-120]]
+        self.navigate_queue_2_new = [['z',3.5],['r',90],['y',14.5],['x',7.0],['r',-125],['m',[6.5,14,-120]],['z',2]]
         self.navigate_queue_2_origin = [['z',3.7],['r',90],['y',14],['x',6.3],['r',-110],['z',2]]
 
 
@@ -92,7 +94,8 @@ class ControllerNode:
             rospy.logwarn('State: WAITING')
             # the movement command format
             self.publishCommand('takeoff')
-            self.navigating_queue_ = deque([['z',1.65],['y',1.5],['x',1.75]]) # 飞到第一个航点
+            # self.navigating_queue_ = deque([['z',1.65],['y',1.5],['x',1.75]]) # 飞到第一个航点
+            self.navigating_queue_ = deque([['z',1.65],['m',[1.75,1.5,90]]]) # 飞到第一个航点
             self.switchNavigatingState()
             self.next_state_ = self.FlightState.DETECTING_WINDOW
 
@@ -111,13 +114,16 @@ class ControllerNode:
                 dim_index = 2
             elif self.navigating_dimension_== 'r': # 设置r为角度的改变
                 dim_index = 3
+            elif self.navigating_dimension_== 'm': # 设置m为位置微调
+                dim_index = 4
+
 
 
             # 也是看目标点与当前位置在对应维度下的坐标差异
-            if dim_index != 3:
+            if dim_index < 3:
                 print("CURRENT POSITION:",self.t_wu_)
                 dist = self.navigating_destination_ - self.t_wu_[dim_index]
-                if abs(dist) < 0.3:  # 当前段导航结束
+                if abs(dist) < 0.2:  # 当前段导航结束
                     self.switchNavigatingState()
                 else:
                     dir_index = 0 if dist > 0 else 1  # direction index
@@ -128,7 +134,7 @@ class ControllerNode:
                         self.publishCommand(command+'300')
                     else:
                         self.publishCommand(command+str(int(abs(100*dist))))
-            else:
+            elif dim_index == 3:
                 (yaw, pitch, roll) = self.R_wu_.as_euler('zyx', degrees=True)
                 angle = self.navigating_destination_
                 print("Euler:",str(yaw),str(pitch),str(roll))
@@ -150,6 +156,12 @@ class ControllerNode:
                         #     rospy.sleep(1)
                         #     self.publishCommand('back %d' % (50)) # 调整旋转导致的位姿偏移
                         return
+            elif dim_index == 4:
+                (yaw, _, _) = self.R_wu_.as_euler('zyx', degrees=True)
+                if self.micro_move(self.t_wu_[0],self.t_wu_[1],yaw,self.navigating_destination_[0],self.navigating_destination_[1],self.navigating_destination_[2]):
+                    self.switchNavigatingState()
+
+
     
 
         elif self.flight_state_ == self.FlightState.DETECTING_WINDOW:
@@ -259,7 +271,71 @@ class ControllerNode:
             self.navigating_destination_ = next_nav[1] # 更新新的目标航点，一次只更新一个维
             self.flight_state_ = self.FlightState.NAVIGATING # 切换到巡航状态
 
+    # 位置微调
+    def micro_move(self,x,y,theta,target_x,target_y,target_yaw):
+        print("START MICRO MOVE")
+        target_x = target_x -x
+        target_y = target_y -y
+        l = math.sqrt(target_x*target_x+target_y*target_y)
+        print("斜边和目标角度sin:")
+        print(l,target_y/l)
+        phi = math.asin(target_y/l)
+        print("phi_sin:",math.sin(phi))
+        if target_x <0:
+            phi = pi-phi
+        print("phi:",str(phi/pi)+"*pi")
+        # 转为弧度制
+        new_theta = theta/180.0*pi
+        delta_theta = new_theta-phi
+        print(delta_theta)
+        front = l*math.cos(delta_theta)
+        front_arrive = False
+        heng_arrive = False
 
+        command = ""
+        if front >0.2:
+            command = "forward "+str(int(100*front))
+            self.publishCommand(command)
+        elif front <-0.2:
+            command = "back "+str(int(100*-front))
+            self.publishCommand(command)
+        else:
+            print("NO FRONT MOVE, BIAS:",str(front))
+            front_arrive = True
+        rospy.sleep(2)
+        command = ""
+        heng = l*math.sin(delta_theta)
+        if heng >0.2:
+            command = "right "+str(int(100*heng))
+            self.publishCommand(command)
+        elif heng <-0.2:
+            command = "left "+str(int(100*-heng))
+            self.publishCommand(command)
+        else:
+            print("NO HENG MOVE, BIAS:",str(heng))
+            heng_arrive = True
+        if front_arrive and heng_arrive:
+            print("YAW DETECTING!")
+            rospy.sleep(2)
+            theta = 360+theta if theta<0 else theta
+            target_yaw = 360+target_yaw if target_yaw<0 else target_yaw
+            yaw_diff = target_yaw - theta
+            print("YAW_DIFF:",yaw_diff)
+            if abs(yaw_diff)<5:
+                print("CORRECT YAW DIFF:",yaw_diff)
+                return True
+            elif yaw_diff>0:
+                command = "ccw " +str(int(yaw_diff))
+                self.publishCommand(command)
+            elif yaw_diff<0:
+                command = "cw " +str(int(-yaw_diff))
+                self.publishCommand(command)
+
+            
+        return False
+
+
+    
     # 判断是否检测到目标
     def detectTarget(self):
         print("开始检测目标")
@@ -345,8 +421,6 @@ class ControllerNode:
 
     # location 1.3.4
     def detect_ball_2(self):
-        if self.skip_1:
-            rospy.sleep(3)
         print("到达监测点2，开始检测")
         
         if self.image_ is None:
