@@ -27,11 +27,12 @@ class CrossDemo:
         self.image_sub_ = rospy.Subscriber("/AKM_1/camera/rgb/image_raw", Image, self.imagesubCallback)
         self.detect_pub = rospy.Publisher('/detect_result', String, queue_size=10)
 
-        self.color_range_red = [(0, 240, 240), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
-        self.color_range_yellow = [(26, 43, 46), (34, 255, 255)] # 黄色
-        self.color_range_blue = [(100, 43, 48), (124, 255, 255)] # 蓝色
+        self.color_range_red = [(0, 249, 102), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
+        self.color_range_yellow =  [(26, 240, 102), (34, 255, 255)] # 黄色
+        self.color_range_blue =  [(100, 200, 71), (116, 255, 255)] # 蓝色
         # ============ 订阅裁判机 =============
         self.imageSub_ = rospy.Subscriber('/tello/cmd_start', Bool, self.startcommandCallback)  # 接收开始的命令
+        self.parkPub_ = rospy.Publisher('/AKM_1/parkstate',String,queue_size = 10)
         self.is_begin_ = False
     
 
@@ -150,6 +151,11 @@ class CrossDemo:
 
 
         rospy.loginfo("Racecar reached")
+
+        park = String()
+        park.data = "PARKING"
+        self.parkPub_.publish(park)
+        print("停靠消息已发布。")
 
 
 

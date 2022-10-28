@@ -41,9 +41,9 @@ class ControllerNode:
         self.t_wu_ = np.zeros([3], dtype=np.float64)
 
         self.image_ = None
-        self.color_range_red = [(0, 43, 46), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度 
-        self.color_range_yellow = [(26, 43, 46), (34, 255, 255)] # 黄色
-        self.color_range_blue = [(100, 43, 48), (124, 255, 255)] # 蓝色
+        self.color_range_red = [(0, 249, 102), (6, 255, 255)] # 红色的HSV范围 HSV颜色空间 H色调S饱和度V亮度
+        self.color_range_yellow = [(26, 240, 102), (34, 255, 255)] # 黄色
+        self.color_range_blue = [(100, 200, 71), (116, 255, 255)] # 蓝色
         
         self.bridge_ = CvBridge()
 
@@ -76,7 +76,7 @@ class ControllerNode:
         # ================ 航点数组 ================
         self.navigate_queue_1 = [['z',3.5],['x',1.5],['r',90],['y',8.0],['r',0],['m',[1.5,8.0,0]],['z',1.75]]
         self.navigate_queue_2_new = [['z',4],['r',90],['y',14],['x',6.5],['z',4],['r',-110],['m',[6.5,14,-110]],['z',2]]
-        self.navigate_queue_2_origin = [['z',3.7],['r',90],['y',14],['x',6.3],['r',-110],['m',[6.5,14,-110]],['z',2]]
+        self.navigate_queue_2_origin = [['z',4],['r',90],['y',14],['x',6.5],['z',4],['r',-110],['m',[6.5,14,-110]],['z',2]]
 
 
         rate = rospy.Rate(0.3)
@@ -183,7 +183,7 @@ class ControllerNode:
                 return
 
             #  TODO：向裁判机特定话题发送检测结果
-            if self.detectTarget():
+            if self.detectTarget() or self.window_index == 2:
                 # 根据无人机当前x坐标判断正确的窗口是哪一个
                 # win_dist = [abs(self.t_wu_[0]-win_x) for win_x in self.window_x_list_]
                 # win_index = win_dist.index(min(win_dist))  # 正确的窗户编号
@@ -252,6 +252,10 @@ class ControllerNode:
             rospy.logwarn('State: LANDING')
             #self.publishCommand('back 100')
             #rospy.sleep(5)
+            (yaw, _, _) = self.R_wu_.as_euler('zyx', degrees=True)
+            while not self.micro_move(self.t_wu_[0],self.t_wu_[1],yaw,7,14.5,-110):   
+                print("终点调试。")
+                (yaw, _, _) = self.R_wu_.as_euler('zyx', degrees=True)
             self.publishCommand('land')
 
             # 在landing阶段向无人车发布自己观察到的结果
@@ -261,6 +265,7 @@ class ControllerNode:
             Result.data = self.result # 注意需要以这种方式打包一下result
 
             self.resultPub_.publish(Result)
+            self.is_begin_ = False
         else:
             pass
 
