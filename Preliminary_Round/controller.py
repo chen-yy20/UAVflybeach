@@ -145,15 +145,9 @@ class ControllerNode:
                 else:
                     if yaw_diff  > 0:  # clockwise
                         self.publishCommand('cw %d' % (int(yaw_diff)))
-                        # if abs(yaw_diff)>40:
-                        #     rospy.sleep(1) # wait 1s
-                        #     self.publishCommand('back %d' % (50)) # 调整旋转导致的位姿偏移
                         return
                     elif yaw_diff < 0:  # counterclockwise
                         self.publishCommand('ccw %d' % (int(-yaw_diff)))
-                        # if abs(yaw_diff)>40:
-                        #     rospy.sleep(1)
-                        #     self.publishCommand('back %d' % (50)) # 调整旋转导致的位姿偏移
                         return
             elif dim_index == 4:
                 (yaw, _, _) = self.R_wu_.as_euler('zyx', degrees=True)
@@ -438,7 +432,7 @@ class ControllerNode:
             return
         image_copy = self.image_.copy()
         # cv2.imshow('检测点2',image_copy)
-        # cv2.waitKey(0)
+        # itcv2.waitKey(0)
         height = image_copy.shape[0]
         width = image_copy.shape[1]
         frame = cv2.resize(image_copy, (width, height), interpolation=cv2.INTER_CUBIC)  # 将图片缩放
