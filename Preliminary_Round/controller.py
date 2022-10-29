@@ -437,8 +437,8 @@ class ControllerNode:
         if self.image_ is None:
             return
         image_copy = self.image_.copy()
-        cv2.imshow('检测点2',image_copy)
-        cv2.waitKey(0)
+        # cv2.imshow('检测点2',image_copy)
+        # cv2.waitKey(0)
         height = image_copy.shape[0]
         width = image_copy.shape[1]
         frame = cv2.resize(image_copy, (width, height), interpolation=cv2.INTER_CUBIC)  # 将图片缩放
