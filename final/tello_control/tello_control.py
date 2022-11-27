@@ -8,6 +8,8 @@ import random
 import numpy as np
 from enum import Enum
 from collections import deque
+import math
+from math import pi
 
 import rospy
 from std_msgs.msg import String
@@ -93,6 +95,7 @@ class control_handler:
 class info_updater():   
     def __init__(self):
         rospy.Subscriber("tello_state", String, self.update_state)
+        # 订阅了无人机相机上的图片
         rospy.Subscriber("tello_image", Image, self.update_img)
         self.con_thread = threading.Thread(target = rospy.spin)
         self.con_thread.start()
@@ -241,14 +244,90 @@ class task_handle():
                 time.sleep(sleep_time)
         print("Arrive at :",target)
 
+    def micro_move(self,target):
+        print("START MICRO MOVE")
+        while(1):
+            delta = self.arrive_target(target)
+            theta = delta[3]
+            if (delta[0]):
+                break
+            target_x = -delta[0]
+            target_y = -delta[1]
+            target_yaw = delta[3]
 
+            l = math.sqrt(target_x*target_x+target_y*target_y)
+            # print("斜边和目标角度sin:")
+            # print(l,target_y/l)
+            phi = math.asin(target_y/l)
+            print("phi_sin:",math.sin(phi))
+            if target_x <0:
+                phi = pi-phi
+            print("phi:",str(phi/pi)+"*pi")
+            # 转为弧度制
+            new_theta = theta/180.0*pi
+            delta_theta = new_theta-phi
+            print(delta_theta)
+            front = l*math.cos(delta_theta)
+            front_arrive = False
+            heng_arrive = False
 
-        
+            if front > 15:
+                ctrl.forward(int(100*front))
+            elif front <-15:
+                ctrl.back(int(100*-front))
+            else:
+                print("NO FRONT MOVE, BIAS:",str(front))
+                front_arrive = True
+            time.sleep(3)
+    
+            heng = l*math.sin(delta_theta)
+            if heng > 15:
+                ctrl.right(int(100*heng))
+            elif heng <-15:
+                ctrl.right(int(100*-heng))
+            else:
+                print("NO HENG MOVE, BIAS:",str(heng))
+                heng_arrive = True
 
+            if front_arrive and heng_arrive:
+                print("YAW DETECTING!")
+                time.sleep(3)
+                theta = 360+theta if theta<0 else theta
+                target_yaw = 360+target_yaw if target_yaw<0 else target_yaw
+                yaw_diff = target_yaw - theta
+                print("YAW_DIFF:",yaw_diff)
+                if abs(yaw_diff)<8:
+                    print("CORRECT YAW DIFF:",yaw_diff)
+                    break
 
-    # 计划通过cv进行负反馈调节通过门
+                elif yaw_diff>0:
+                    command = "ccw " +str(int(yaw_diff))
+                    self.publishCommand(command)
+                elif yaw_diff<0:
+                    command = "cw " +str(int(-yaw_diff))
+                    self.publishCommand(command)
+
+                
+
+    # 写死飞机的轨迹
+    def total_navigation(self):
+        assert (self.now_stage == self.taskstages.finding_location)
+        self.navigation_queue = deque([[]])
+
+    def red_point_detect(self):
+        # TODO: 窗户红点检测，定位对应窗户的位置
+        pass
+
+    # TODO: 计划通过cv进行负反馈调节通过门
     def passing_door(self):
         assert (self.now_stage == self.taskstages.passing_door)
+        window_list = [] # format：[[x,-220,z,90]...]
+        self.target_move([-45,-225,160,90]) #TODO: 坐标有待调整 
+        window_index = self.red_point_detect()
+        self.target_move(window_list[window_index])
+        ctrl.forward(60)
+        print("Window passed!")
+        self.now_stage = self.taskstages.navigation
         
 
 
@@ -256,7 +335,6 @@ class task_handle():
         assert (self.now_stage == self.taskstages.order_location)
         state_conf = 0
         # 获取当前状态
-        # TODO： 定位毯具体坐标
         self.States_Dict = parse_state()
         target = [-100,30,150,90]
         self.target_move(target)
@@ -265,48 +343,6 @@ class task_handle():
         print("stop")
         showimg()
         self.now_stage = self.taskstages.finished    
-
-        # while not ( self.States_Dict['mpry'][1] <= 8 and self.States_Dict['mpry'][1] >= -8 and self.States_Dict['x'] <= 20 and self.States_Dict['x'] >= -20 and  self.States_Dict['y'] <= 20 and self.States_Dict['y'] >= -20 and abs(self.States_Dict['z']) >= 120 and abs(self.States_Dict['z']) <= 160):
-        #     print("in state")
-        #     if ( abs(self.States_Dict['z']) > 160 or abs(self.States_Dict['z']) < 120 ):
-        #         if (abs(self.States_Dict['z']) < 120):
-        #             self.ctrl.up(20)     
-        #             time.sleep(4)
-        #         elif (abs(self.States_Dict['z']) > 160):
-        #             self.ctrl.down(20) 
-        #             time.sleep(4)
-        #     elif ( self.States_Dict['mpry'][1] < -8 or self.States_Dict['mpry'][1] > 8 ):
-        #         if (self.States_Dict['mpry'][1] > 8):
-        #             self.ctrl.cw(20)
-        #             time.sleep(4)
-        #         elif(self.States_Dict['mpry'][1] < -8):
-        #             self.ctrl.ccw(20)
-        #             time.sleep(4)
-        #     elif ( self.States_Dict['x'] < -20 or self.States_Dict['x'] > 20 ):
-        #         if (self.States_Dict['x'] < -20):
-        #             self.ctrl.forward(20)
-        #             time.sleep(4)
-        #         elif(self.States_Dict['x'] > 20):
-        #             self.ctrl.back(20)
-        #             time.sleep(4)
-        #     elif ( self.States_Dict['y'] < -20 or self.States_Dict['y'] > 20 ):
-        #         if (self.States_Dict['y'] < -20):
-        #             self.ctrl.left(20)
-        #             time.sleep(4)
-        #         elif(self.States_Dict['y'] > 20):
-        #             self.ctrl.right(20)
-        #             time.sleep(4)
-        #     else:
-        #         time.sleep(2)
-        #         self.ctrl.stop()
-        #         state_conf += 1
-        #         print("stop")
-        #     self.States_Dict = parse_state()
-        #     showimg()
-        #     if self.States_Dict['mid'] < 0 :
-        #         self.now_stage = self.taskstages.finding_location
-        #         return
-        # self.now_stage = self.taskstages.finished     
 
 
 if __name__ == '__main__':
