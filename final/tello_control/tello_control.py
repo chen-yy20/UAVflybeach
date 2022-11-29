@@ -196,10 +196,10 @@ class task_handle():
             self.now_stage = self.taskstages.finding_location
             print("----------- LOST LOCATION !!! -------------")
             return (False)
-        delta_x = self.States_Dict['x']-target[0]
-        delta_y = self.States_Dict['y']-target[1]
-        delta_z = self.States_Dict['z']-target[2]
-        delta_yaw = self.States_Dict['yaw']-target[3]
+        delta_x = 0 if target[0]==404 else target[0]-self.States_Dict['x']
+        delta_y = 0 if target[1]==404 else target[1]-self.States_Dict['y']
+        delta_z = 0 if target[2]==404 else target[2]-self.States_Dict['z']
+        delta_yaw = 0 if target[3]==404 else target[3]-self.States_Dict['yaw']
         result = False
         if (abs(delta_x)<15 and abs(delta_y)<15 and abs(delta_z)<15 and abs(delta_yaw)<8):
             result = True
@@ -208,89 +208,98 @@ class task_handle():
         return ans
 
     # target format: [x,y,z,yaw]
+    # 如果 [x,y,z,yaw] 中任意一项为404，则意味着这一维度不需要进行移动
     def target_move(self,target):
         sleep_time = 5
         while (1):
-            delta = self.arrive_target(target)
+            delta = self.arrive_target(target) 
             if delta[0]:
                 break
 
             if delta[3]>15:
-                self.ctrl.down(delta[3])
+                self.ctrl.up(delta[3])
                 time.sleep(sleep_time)
             elif delta[3]<-15:
-                self.ctrl.up(-delta[3])
+                self.ctrl.down(-delta[3])
                 time.sleep(sleep_time)
            
             if delta[4] > 8:
-                self.ctrl.cw(delta[4])
+                self.ctrl.ccw(delta[4])
                 time.sleep(sleep_time)
             elif delta[4]<-8:
-                self.ctrl.ccw(-delta[4])
+                self.ctrl.cw(-delta[4])
                 time.sleep(sleep_time)
 
             if delta[1]>15:
-                self.ctrl.left(delta[1])
+                self.ctrl.right(delta[1])
                 time.sleep(sleep_time)
             elif delta[1]<-15:
-                self.ctrl.right(-delta[1])
+                self.ctrl.left(-delta[1])
                 time.sleep(sleep_time)
 
             if delta[2]>15:
-                self.ctrl.back(delta[2])
+                self.ctrl.forward(delta[2])
                 time.sleep(sleep_time)
             elif delta[2]<-15:
-                self.ctrl.forward(-delta[2])
+                self.ctrl.back(-delta[2])
                 time.sleep(sleep_time)
         print("Arrive at :",target)
 
+    def fly_upto(self,z):
+        delta_z = 12
+        while(abs(delta_z)>10):
+            self.States_Dict = parse_state()
+            delta_z = z-self.States_Dict['z']
+            if delta_z>10:
+                self.ctrl.up(int(delta_z))
+            elif delta_z<-10:
+                self.ctrl.down(int(-delta_z))
+    
     def micro_move(self,target):
         print("START MICRO MOVE")
         while(1):
             delta = self.arrive_target(target)
-            theta = delta[3]
+            theta = target[3]-delta[3]
             if (delta[0]):
                 break
-            target_x = -delta[0]
-            target_y = -delta[1]
-            target_yaw = delta[3]
 
-            l = math.sqrt(target_x*target_x+target_y*target_y)
+            l = math.sqrt(delta[1]*delta[1]+delta[2]*delta[2])
             # print("斜边和目标角度sin:")
             # print(l,target_y/l)
-            phi = math.asin(target_y/l)
-            print("phi_sin:",math.sin(phi))
-            if target_x <0:
+            phi = math.asin(delta[2]/l)
+            # print("phi_sin:",math.sin(phi))
+            if delta[1] <0:
                 phi = pi-phi
-            print("phi:",str(phi/pi)+"*pi")
+            # print("phi:",str(phi/pi)+"*pi")
             # 转为弧度制
-            new_theta = theta/180.0*pi
-            delta_theta = new_theta-phi
+            rad_theta = theta/180.0*pi
+            delta_theta = phi-rad_theta
             print(delta_theta)
             front = l*math.cos(delta_theta)
             front_arrive = False
             heng_arrive = False
 
             if front > 15:
-                ctrl.forward(int(100*front))
+                ctrl.forward(int(front))
             elif front <-15:
-                ctrl.back(int(100*-front))
+                ctrl.back(int(-front))
             else:
                 print("NO FRONT MOVE, BIAS:",str(front))
                 front_arrive = True
             time.sleep(3)
-    
+
             heng = l*math.sin(delta_theta)
             if heng > 15:
-                ctrl.right(int(100*heng))
+                ctrl.left(int(heng))
             elif heng <-15:
-                ctrl.right(int(100*-heng))
+                ctrl.right(int(-heng))
             else:
                 print("NO HENG MOVE, BIAS:",str(heng))
                 heng_arrive = True
+            
 
             if front_arrive and heng_arrive:
-                print("YAW DETECTING!")
+                print("YAW ADJUSTING!")
                 time.sleep(3)
                 theta = 360+theta if theta<0 else theta
                 target_yaw = 360+target_yaw if target_yaw<0 else target_yaw
@@ -301,11 +310,9 @@ class task_handle():
                     break
 
                 elif yaw_diff>0:
-                    command = "ccw " +str(int(yaw_diff))
-                    self.publishCommand(command)
+                    ctrl.ccw(int(yaw_diff))
                 elif yaw_diff<0:
-                    command = "cw " +str(int(-yaw_diff))
-                    self.publishCommand(command)
+                    ctrl.cw(int(-yaw_diff))
 
                 
 
